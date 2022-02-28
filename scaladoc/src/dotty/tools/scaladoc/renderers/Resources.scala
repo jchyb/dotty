@@ -140,20 +140,39 @@ trait Resources(using ctx: DocContext) extends Locations, Writer:
         "k" -> jsonString(kind)
       )
 
+    // def renderSignaturePart(e: SignaturePart) = e match
+    //   case Type(name, Some(dri)) => name
+    //   case Type(name, None) => name
+    //   case Keyword(name) => name
+    //   case Plain(name) => name
+
+    def getParentTypeStringMaybe(child: Member, parentMaybe: Option[Member]): Option[String] =
+      child.kind match
+        case Kind.Extension(on, _) => Some(flattenToText(on.signature))
+        case _ =>
+          parentMaybe.map { member =>
+            member.kind match
+              case _: Kind.Class => Some(flattenToText(member.signature))
+              case Kind.Object => Some(flattenToText(member.signature).stripSuffix(".type"))
+              case _: Kind.Trait => Some(flattenToText(member.signature))
+              case _ => None
+          }.getOrElse(None)
+
     def processPage(page: Page): Seq[JSON] =
       val res =  page.content match
         case m: Member if m.kind != Kind.RootPackage =>
-          val descr = m.dri.asFileLocation
-          def processMember(member: Member): Seq[JSON] =
+          val location = m.dri.asFileLocation
+          def processMember(member: Member, parentPageMaybe: Option[Member]): Seq[JSON] =
             val signatureBuilder = ScalaSignatureProvider.rawSignature(member, InlineSignatureBuilder())().asInstanceOf[InlineSignatureBuilder]
             val sig = Signature(Plain(s"${member.kind.name} "), Plain(member.name)) ++ signatureBuilder.names.reverse
+            val descr = getParentTypeStringMaybe(member, parentPageMaybe).fold("")(_ + " ") + location
             val entry = mkEntry(member.dri, member.name, flattenToText(sig), descr, member.kind.name)
             val children = member
                 .membersBy(m => m.kind != Kind.Package && !m.kind.isInstanceOf[Classlike])
                 .filter(m => m.origin == Origin.RegularlyDefined && m.inheritedFrom.isEmpty)
-            Seq(entry) ++ children.flatMap(processMember)
+            Seq(entry) ++ children.flatMap(processMember(_, Some(m)))
 
-          processMember(m)
+          processMember(m, None)
         case _ =>
           Seq(mkEntry(page.link.dri, page.link.name, page.link.name, "", "static"))
 

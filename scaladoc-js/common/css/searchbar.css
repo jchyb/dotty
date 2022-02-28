@@ -245,6 +245,10 @@ div[selected] > .scaladoc-searchbar-inkuire-package {
   padding-left: 20px;
 }
 
+.scaladoc-searchbar-location {
+  white-space: nowrap;
+}
+
 #searchBar {
   display: inline-flex;
 }
