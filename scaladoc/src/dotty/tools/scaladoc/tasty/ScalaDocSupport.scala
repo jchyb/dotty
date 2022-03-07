@@ -5,6 +5,7 @@ import scala.jdk.CollectionConverters._
 
 import dotty.tools.scaladoc.Scaladoc.CommentSyntax
 import dotty.tools.scaladoc.tasty.comments.Comment
+import dotty.tools.scaladoc.tasty.SymOps.source
 
 import scala.quoted._
 
@@ -17,14 +18,16 @@ object ScaladocSupport:
     val commentSyntax =
       preparsed.syntax.headOption match {
         case Some(commentSetting) =>
-          CommentSyntax.parse(commentSetting).getOrElse {
+          CommentSyntax.CommentSyntaxParser.parse(commentSetting).getOrElse {
             val msg = s"not a valid comment syntax: $commentSetting, defaulting to Markdown syntax."
             // we should update pos with span from documentation
             pos.fold(report.warning(msg))(report.warning(msg, _))
 
             CommentSyntax.default
           }
-        case None => summon[DocContext].args.defaultSyntax
+        case None => 
+          val path = sym.source.map(_.path)
+          summon[DocContext].commentSyntaxArgs.get(path)
       }
 
     val parser = commentSyntax match {

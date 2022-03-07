@@ -49,6 +49,10 @@ object ScaladocGeneration {
     def key: String = "-comment-syntax"
   }
 
+  case class CommentSyntaxOverrides(value: List[String]) extends Arg[List[String]] {
+    def key: String = "-comment-syntax-overrides"
+  }
+
   case class Revision(value: String) extends Arg[String] {
     def key: String = "-revision"
   }

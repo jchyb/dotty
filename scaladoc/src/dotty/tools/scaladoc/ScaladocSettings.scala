@@ -43,6 +43,9 @@ class ScaladocSettings extends SettingGroup with AllScalaSettings:
   val syntax: Setting[String] =
     StringSetting("-comment-syntax", "syntax", "Syntax of the comment used", "")
 
+  val syntaxOverrides: Setting[List[String]] =
+    MultiStringSetting("-comment-syntax-overrides", "overrides", tasty.comments.CommentSyntaxOverridesArgs.usage)
+
   val revision: Setting[String] =
     StringSetting("-revision", "revision", "Revision (branch or ref) used to build project project", "")
 
@@ -136,4 +139,4 @@ class ScaladocSettings extends SettingGroup with AllScalaSettings:
 
 
   def scaladocSpecificSettings: Set[Setting[_]] =
-    Set(sourceLinks, legacySourceLink, syntax, revision, externalDocumentationMappings, socialLinks, skipById, skipByRegex, deprecatedSkipPackages, docRootContent, snippetCompiler, generateInkuire, scastieConfiguration)
+    Set(sourceLinks, legacySourceLink, syntax, syntaxOverrides, revision, externalDocumentationMappings, socialLinks, skipById, skipByRegex, deprecatedSkipPackages, docRootContent, snippetCompiler, generateInkuire, scastieConfiguration)

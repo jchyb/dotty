@@ -23,10 +23,11 @@ object Scaladoc:
     case Markdown
 
   object CommentSyntax:
-    def parse(str: String) = str match
-        case "wiki" => Some(CommentSyntax.Wiki)
-        case "markdown" => Some(CommentSyntax.Markdown)
-        case _ => None
+    object CommentSyntaxParser extends ArgParser[CommentSyntax]:
+      def parse(s: String): Either[String, CommentSyntax] = s match
+          case "wiki" => Right(CommentSyntax.Wiki)
+          case "markdown" => Right(CommentSyntax.Markdown)
+          case _ => Left(s"No such syntax found.")
 
     val default = CommentSyntax.Markdown
 
@@ -42,6 +43,7 @@ object Scaladoc:
     projectLogo: Option[String] = None,
     projectFooter: Option[String] = None,
     defaultSyntax: CommentSyntax = CommentSyntax.Markdown,
+    commentSyntaxOverrides: List[String] = Nil,
     sourceLinks: List[String] = Nil,
     revision: Option[String] = None,
     externalMappings: List[ExternalDocLink] = Nil,
@@ -165,7 +167,7 @@ object Scaladoc:
         File("output")
 
       val parseSyntax: CommentSyntax = syntax.nonDefault.fold(CommentSyntax.default){ str =>
-        CommentSyntax.parse(str).getOrElse{
+        CommentSyntax.CommentSyntaxParser.parse(str).getOrElse{
           report.error(s"unrecognized value for -syntax option: $str")
           CommentSyntax.default
         }
@@ -220,6 +222,7 @@ object Scaladoc:
         projectLogo.nonDefault,
         projectFooter.nonDefault,
         parseSyntax,
+        syntaxOverrides.get,
         sourceLinks.get ++ legacySourceLinkList,
         revision.nonDefault,
         externalMappings ++ legacyExternalMappings,
