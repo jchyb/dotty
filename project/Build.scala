@@ -1802,6 +1802,10 @@ object ScaladocConfigs {
       .add(Revision("main"))
       .add(SnippetCompiler(List("scaladoc-testcases/docs=compile")))
       .add(SiteRoot("scaladoc-testcases/docs"))
+      .add(CommentSyntaxOverrides(List(
+        "scaladoc-testcases/src/example/comment-md=markdown",
+        "scaladoc-testcases/src/example/comment-wiki=wiki"
+      )))
       .add(ExternalMappings(List(dottyExternalMapping, javaExternalMapping)))
       .withTargets(tastyRoots)
   }
