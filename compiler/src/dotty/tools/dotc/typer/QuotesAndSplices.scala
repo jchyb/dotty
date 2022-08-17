@@ -49,7 +49,7 @@ trait QuotesAndSplices {
       report.error(em"Quotes require stable Quotes, but found non stable $qctx", qctx.srcPos)
 
     if ctx.mode.is(Mode.Pattern) then
-      typedQuotePattern(tree, pt, qctx).withSpan(tree.span)
+      PrepareInlineable.makeInlineable(typedQuotePattern(tree, pt, qctx).withSpan(tree.span))
     else if tree.quoted.isType then
       val msg = em"""Quoted types `'[..]` can only be used in patterns.
                     |
