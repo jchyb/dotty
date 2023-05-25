@@ -20,10 +20,14 @@ object DottyUnpickler {
   /** Exception thrown if classfile is corrupted */
   class BadSignature(msg: String) extends RuntimeException(msg)
 
-  class TreeSectionUnpickler(posUnpickler: Option[PositionUnpickler], commentUnpickler: Option[CommentUnpickler], attributeUnpickler: Option[AttributeUnpickler])
-  extends SectionUnpickler[TreeUnpickler](ASTsSection) {
+  class TreeSectionUnpickler(
+    posUnpickler: Option[PositionUnpickler],
+    commentUnpickler: Option[CommentUnpickler],
+    attributeUnpickler: Option[AttributeUnpickler],
+    isBestEffortTasty: Boolean = false
+  ) extends SectionUnpickler[TreeUnpickler](ASTsSection) {
     def unpickle(reader: TastyReader, nameAtRef: NameTable): TreeUnpickler =
-      new TreeUnpickler(reader, nameAtRef, posUnpickler, commentUnpickler, attributeUnpickler)
+      new TreeUnpickler(reader, nameAtRef, posUnpickler, commentUnpickler, attributeUnpickler, isBestEffortTasty)
   }
 
   class PositionsSectionUnpickler extends SectionUnpickler[PositionUnpickler](PositionsSection) {
@@ -42,18 +46,19 @@ object DottyUnpickler {
 }
 
 /** A class for unpickling Tasty trees and symbols.
- *  @param bytes         the bytearray containing the Tasty file from which we unpickle
- *  @param mode          the tasty file contains package (TopLevel), an expression (Term) or a type (TypeTree)
+ *  @param bytes             the bytearray containing the Tasty file from which we unpickle
+ *  @param mode              the tasty file contains package (TopLevel), an expression (Term) or a type (TypeTree)
+ *  @param isBestEffortTasty specifies wheather file should be unpickled as a Best Effort TASTy
  */
-class DottyUnpickler(bytes: Array[Byte], mode: UnpickleMode = UnpickleMode.TopLevel) extends ClassfileParser.Embedded with tpd.TreeProvider {
+class DottyUnpickler(bytes: Array[Byte], mode: UnpickleMode = UnpickleMode.TopLevel, isBestEffortTasty: Boolean = false) extends ClassfileParser.Embedded with tpd.TreeProvider {
   import tpd.*
   import DottyUnpickler.*
 
-  val unpickler: TastyUnpickler = new TastyUnpickler(bytes)
+  val unpickler: TastyUnpickler = new TastyUnpickler(bytes, isBestEffortTasty)
   private val posUnpicklerOpt = unpickler.unpickle(new PositionsSectionUnpickler)
   private val commentUnpicklerOpt = unpickler.unpickle(new CommentsSectionUnpickler)
   private val attributeUnpicklerOpt = unpickler.unpickle(new AttributesSectionUnpickler)
-  private val treeUnpickler = unpickler.unpickle(treeSectionUnpickler(posUnpicklerOpt, commentUnpicklerOpt, attributeUnpicklerOpt)).get
+  private val treeUnpickler = unpickler.unpickle(treeSectionUnpickler(posUnpicklerOpt, commentUnpicklerOpt, attributeUnpicklerOpt, isBestEffortTasty)).get
 
   /** Enter all toplevel classes and objects into their scopes
    *  @param roots          a set of SymDenotations that should be overwritten by unpickling
@@ -64,9 +69,10 @@ class DottyUnpickler(bytes: Array[Byte], mode: UnpickleMode = UnpickleMode.TopLe
   protected def treeSectionUnpickler(
     posUnpicklerOpt: Option[PositionUnpickler],
     commentUnpicklerOpt: Option[CommentUnpickler],
-    attributeUnpicklerOpt: Option[AttributeUnpickler]
+    attributeUnpicklerOpt: Option[AttributeUnpickler],
+    withBestEffortTasty: Boolean
   ): TreeSectionUnpickler =
-    new TreeSectionUnpickler(posUnpicklerOpt, commentUnpicklerOpt, attributeUnpicklerOpt)
+    new TreeSectionUnpickler(posUnpicklerOpt, commentUnpicklerOpt, attributeUnpicklerOpt, withBestEffortTasty)
 
   protected def computeRootTrees(using Context): List[Tree] = treeUnpickler.unpickle(mode)
 

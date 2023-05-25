@@ -67,6 +67,7 @@ object TestConfiguration {
 
   val commonOptions = Array("-indent") ++ checkOptions ++ noCheckOptions ++ yCheckOptions
   val defaultOptions = TestFlags(basicClasspath, commonOptions)
+  val bestEffortBaselineOptions = TestFlags(basicClasspath, noCheckOptions)
   val unindentOptions = TestFlags(basicClasspath, Array("-no-indent") ++ checkOptions ++ noCheckOptions ++ yCheckOptions)
   val withCompilerOptions =
     defaultOptions.withClasspath(withCompilerClasspath).withRunClasspath(withCompilerClasspath)

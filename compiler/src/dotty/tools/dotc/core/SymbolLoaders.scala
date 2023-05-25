@@ -7,7 +7,7 @@ import java.nio.channels.ClosedByInterruptException
 
 import scala.util.control.NonFatal
 
-import dotty.tools.dotc.classpath.FileUtils.isTasty
+import dotty.tools.dotc.classpath.FileUtils.{isTasty, isBestEffortTasty}
 import dotty.tools.io.{ ClassPath, ClassRepresentation, AbstractFile }
 import dotty.tools.backend.jvm.DottyBackendInterface.symExtensions
 
@@ -26,6 +26,7 @@ import parsing.JavaParsers.OutlineJavaParser
 import parsing.Parsers.OutlineParser
 import dotty.tools.tasty.{TastyHeaderUnpickler, UnpickleException, UnpicklerConfig}
 import dotty.tools.dotc.core.tasty.TastyUnpickler
+import dotty.tools.tasty.besteffort.BestEffortTastyHeaderUnpickler
 
 
 object SymbolLoaders {
@@ -199,7 +200,7 @@ object SymbolLoaders {
         enterToplevelsFromSource(owner, nameOf(classRep), src)
       case (Some(bin), _) =>
         val completer =
-          if bin.isTasty then ctx.platform.newTastyLoader(bin)
+          if bin.isTasty || bin.isBestEffortTasty then ctx.platform.newTastyLoader(bin)
           else ctx.platform.newClassLoader(bin)
         enterClassAndModule(owner, nameOf(classRep), completer)
     }
@@ -262,7 +263,8 @@ object SymbolLoaders {
       (idx + str.TOPLEVEL_SUFFIX.length + 1 != name.length || !name.endsWith(str.TOPLEVEL_SUFFIX))
     }
 
-    def maybeModuleClass(classRep: ClassRepresentation): Boolean = classRep.name.last == '$'
+    def maybeModuleClass(classRep: ClassRepresentation): Boolean =
+      classRep.name.nonEmpty && classRep.name.last == '$'
 
     private def enterClasses(root: SymDenotation, packageName: String, flat: Boolean)(using Context) = {
       def isAbsent(classRep: ClassRepresentation) =
@@ -419,25 +421,36 @@ class TastyLoader(val tastyFile: AbstractFile) extends SymbolLoader {
 
   override def sourceFileOrNull: AbstractFile | Null = tastyFile
 
-  def description(using Context): String = "TASTy file " + tastyFile.toString
+  def description(using Context): String =
+    if tastyFile.extension == ".betasty" then "Best Effort TASTy file " + tastyFile.toString
+    else "TASTy file " + tastyFile.toString
 
   override def doComplete(root: SymDenotation)(using Context): Unit =
+    val isBestEffortTasty = tastyFile.name.endsWith(".betasty")
     try
       val (classRoot, moduleRoot) = rootDenots(root.asClass)
-      val tastyBytes = tastyFile.toByteArray
-      val unpickler = new tasty.DottyUnpickler(tastyBytes)
-      unpickler.enter(roots = Set(classRoot, moduleRoot, moduleRoot.sourceModule))(using ctx.withSource(util.NoSource))
-      if mayLoadTreesFromTasty then
-        classRoot.classSymbol.rootTreeOrProvider = unpickler
-        moduleRoot.classSymbol.rootTreeOrProvider = unpickler
-      checkTastyUUID(tastyFile, tastyBytes)
+      if (!isBestEffortTasty || ctx.withBestEffortTasty) then
+        val tastyBytes = tastyFile.toByteArray
+        val unpickler = new tasty.DottyUnpickler(tastyBytes, isBestEffortTasty = isBestEffortTasty)
+        unpickler.enter(roots = Set(classRoot, moduleRoot, moduleRoot.sourceModule))(using ctx.withSource(util.NoSource))
+        if mayLoadTreesFromTasty || (isBestEffortTasty && ctx.withBestEffortTasty) then
+          classRoot.classSymbol.rootTreeOrProvider = unpickler
+          moduleRoot.classSymbol.rootTreeOrProvider = unpickler
+        if isBestEffortTasty then
+          checkBeTastyUUID(tastyFile, tastyBytes)
+          ctx.setUsesBestEffortTasty()
+        else
+          checkTastyUUID(tastyFile, tastyBytes)
+      else
+        report.error(em"Best Effort TASTy $tastyFile file could not be read.")
     catch case e: RuntimeException =>
+      val tastyType = if (isBestEffortTasty) "Best Effort TASTy" else "TASTy"
       val message = e match
         case e: UnpickleException =>
-          i"""TASTy file ${tastyFile.canonicalPath} could not be read, failing with:
+          i"""$tastyType file ${tastyFile.canonicalPath} could not be read, failing with:
             |  ${Option(e.getMessage).getOrElse("")}"""
         case _ =>
-          i"""TASTy file ${tastyFile.canonicalPath} is broken, reading aborted with ${e.getClass}
+          i"""$tastyFile file ${tastyFile.canonicalPath} is broken, reading aborted with ${e.getClass}
             |  ${Option(e.getMessage).getOrElse("")}"""
       if (ctx.debug) e.printStackTrace()
       throw IOException(message)
@@ -453,6 +466,9 @@ class TastyLoader(val tastyFile: AbstractFile) extends SymbolLoader {
     else
       // This will be the case in any of our tests that compile with `-Youtput-only-tasty`
       report.inform(s"No classfiles found for $tastyFile when checking TASTy UUID")
+
+  private def checkBeTastyUUID(tastyFile: AbstractFile, tastyBytes: Array[Byte])(using Context): Unit =
+    new BestEffortTastyHeaderUnpickler(tastyBytes).readHeader()
 
   private def mayLoadTreesFromTasty(using Context): Boolean =
     ctx.settings.YretainTrees.value || ctx.settings.fromTasty.value

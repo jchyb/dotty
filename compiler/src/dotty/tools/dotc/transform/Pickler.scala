@@ -16,6 +16,9 @@ import reporting.{ThrowingReporter, Profile, Message}
 import collection.mutable
 import util.concurrent.{Executor, Future}
 import compiletime.uninitialized
+import java.nio.file.Files
+import scala.language.unsafeNulls
+import scala.util.control.NonFatal
 
 object Pickler {
   val name: String = "pickler"
@@ -38,7 +41,10 @@ class Pickler extends Phase {
 
   // No need to repickle trees coming from TASTY
   override def isRunnable(using Context): Boolean =
-    super.isRunnable && !ctx.settings.fromTasty.value
+    (super.isRunnable || ctx.isBestEffort)
+    && !ctx.settings.fromTasty.value
+    && (!ctx.usesBestEffortTasty || ctx.isBestEffort)
+    // we do not want to pickle `.betasty` if will not create the file either way
 
   private def output(name: String, msg: String) = {
     val s = new PrintStream(name)
@@ -73,10 +79,11 @@ class Pickler extends Phase {
   private val executor = Executor[Array[Byte]]()
 
   private def useExecutor(using Context) =
-    Pickler.ParallelPickling && !ctx.settings.YtestPickler.value
+    Pickler.ParallelPickling && !ctx.settings.YtestPickler.value && !ctx.isBestEffort
 
   override def run(using Context): Unit = {
     val unit = ctx.compilationUnit
+    val isBestEffort = ctx.reporter.errorsReported || ctx.usesBestEffortTasty
     pickling.println(i"unpickling in run ${ctx.runId}")
 
     for
@@ -87,7 +94,14 @@ class Pickler extends Phase {
 
       val pickler = new TastyPickler(cls)
       val treePkl = new TreePickler(pickler)
-      treePkl.pickle(tree :: Nil)
+      val successful =
+        try
+          treePkl.pickle(tree :: Nil)
+          true
+        catch
+          case NonFatal(ex) if ctx.isBestEffort =>
+            report.bestEffortError(ex, "Some best-effort tasty files will not be generated.")
+            false
       Profile.current.recordTasty(treePkl.buf.length)
 
       val positionWarnings = new mutable.ListBuffer[Message]()
@@ -114,7 +128,7 @@ class Pickler extends Phase {
           )
           AttributePickler.pickleAttributes(attributes, pickler, scratch.attributeBuffer)
 
-          val pickled = pickler.assembleParts()
+          val pickled = pickler.assembleParts(isBestEffort)
 
           def rawBytes = // not needed right now, but useful to print raw format.
             pickled.iterator.grouped(10).toList.zipWithIndex.map {
@@ -130,23 +144,23 @@ class Pickler extends Phase {
         }
       }
 
-      /** A function that returns the pickled bytes. Depending on `Pickler.ParallelPickling`
-       *  either computes the pickled data in a future or eagerly before constructing the
-       *  function value.
-       */
-      val demandPickled: () => Array[Byte] =
-        if useExecutor then
-          val futurePickled = executor.schedule(computePickled)
-          () =>
-            try futurePickled.force.get
-            finally reportPositionWarnings()
-        else
-          val pickled = computePickled()
-          reportPositionWarnings()
-          if ctx.settings.YtestPickler.value then pickledBytes(cls) = (unit, pickled)
-          () => pickled
-
-      unit.pickled += (cls -> demandPickled)
+      if successful then
+        /** A function that returns the pickled bytes. Depending on `Pickler.ParallelPickling`
+         *  either computes the pickled data in a future or eagerly before constructing the
+         *  function value.
+         */
+        val demandPickled: () => Array[Byte] =
+          if useExecutor then
+            val futurePickled = executor.schedule(computePickled)
+            () =>
+              try futurePickled.force.get
+              finally reportPositionWarnings()
+          else
+            val pickled = computePickled()
+            reportPositionWarnings()
+            if ctx.settings.YtestPickler.value then pickledBytes(cls) = (unit, pickled)
+            () => pickled
+        unit.pickled += (cls -> demandPickled)
     end for
   }
 
@@ -168,6 +182,13 @@ class Pickler extends Phase {
           .setReporter(new ThrowingReporter(ctx.reporter))
           .addMode(Mode.ReadPositions)
       )
+    if ctx.isBestEffort then
+      val outpath =
+        ctx.settings.outputDir.value.jpath.toAbsolutePath.normalize
+          .resolve("META-INF")
+          .resolve("best-effort")
+      Files.createDirectories(outpath)
+      BestEffortTastyWriter.write(outpath.nn, result)
     result
   }
 

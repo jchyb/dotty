@@ -53,12 +53,14 @@ import scala.compiletime.uninitialized
  *  @param posUnpicklerOpt     the unpickler for positions, if it exists
  *  @param commentUnpicklerOpt the unpickler for comments, if it exists
  *  @param attributeUnpicklerOpt the unpickler for attributes, if it exists
+ *  @param isBestEffortTasty   decides whether to unpickle as a Best Effort TASTy
  */
 class TreeUnpickler(reader: TastyReader,
                     nameAtRef: NameTable,
                     posUnpicklerOpt: Option[PositionUnpickler],
                     commentUnpicklerOpt: Option[CommentUnpickler],
-                    attributeUnpicklerOpt: Option[AttributeUnpickler]) {
+                    attributeUnpicklerOpt: Option[AttributeUnpickler],
+                    isBestEffortTasty: Boolean = false) {
   import TreeUnpickler.*
   import tpd.*
 
@@ -475,7 +477,14 @@ class TreeUnpickler(reader: TastyReader,
           ConstantType(readConstant(tag))
       }
 
-      if (tag < firstLengthTreeTag) readSimpleType() else readLengthType()
+      def readSimpleTypeBestEffort(): Type = tag match {
+        case ERRORtype => new PreviousErrorType
+        case _ => readSimpleType()
+      }
+
+      if (tag < firstLengthTreeTag){
+        if (isBestEffortTasty) readSimpleTypeBestEffort() else readSimpleType()
+      } else readLengthType()
     }
 
     private def readSymNameRef()(using Context): Type = {
@@ -928,6 +937,7 @@ class TreeUnpickler(reader: TastyReader,
             val rhs = readTpt()(using localCtx)
 
             sym.info = new NoCompleter:
+              override def complete(denot: SymDenotation)(using Context): Unit = if !isBestEffortTasty then unsupported("complete")
               override def completerTypeParams(sym: Symbol)(using Context) =
                 rhs.tpe.typeParams
 
@@ -1003,8 +1013,14 @@ class TreeUnpickler(reader: TastyReader,
             case nu: New =>
               try nu.tpe
               finally goto(end)
+            case other if isBestEffortTasty =>
+              try other.tpe
+              finally goto(end)
         case SHAREDterm =>
           forkAt(readAddr()).readParentType()
+        case SELECT if isBestEffortTasty =>
+          goto(readEnd())
+          new PreviousErrorType
 
     /** Read template parents
      *  @param  withArgs if false, only read enough of parent trees to determine their type
@@ -1191,6 +1207,7 @@ class TreeUnpickler(reader: TastyReader,
           case path: TermRef => ref(path)
           case path: ThisType => untpd.This(untpd.EmptyTypeIdent).withType(path)
           case path: ConstantType => Literal(path.value)
+          case path: ErrorType if isBestEffortTasty => TypeTree(path)
         }
       }
 
