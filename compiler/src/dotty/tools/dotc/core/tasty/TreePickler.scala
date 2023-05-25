@@ -62,6 +62,12 @@ class TreePickler(pickler: TastyPickler) {
     fillRef(lengthAddr, currentAddr, relative = true)
   }
 
+  /* There are certain expectations with code naturally being able to reach typer vs 
+   * one that uses best-effort-compilation. 
+   */
+  private inline def assertForBestEffort(assertion: Boolean)(using ctx: Context) =
+    !ctx.isBestEffort || assertion
+
   def addrOfSym(sym: Symbol): Option[Addr] =
     symRefs.get(sym)
 
@@ -289,9 +295,15 @@ class TreePickler(pickler: TastyPickler) {
       else if tpe.isImplicitMethod then mods |= Implicit
       pickleMethodic(METHODtype, tpe, mods)
     case tpe: ParamRef =>
-      assert(pickleParamRef(tpe), s"orphan parameter reference: $tpe")
+      val pickled = pickleParamRef(tpe)
+      if !ctx.isBestEffort then assert(pickled, s"orphan parameter reference: $tpe")
+      else if !pickled then pickleError()
     case tpe: LazyRef =>
       pickleType(tpe.ref)
+    case tpe: ErrorType if ctx.isBestEffort =>
+      pickleError()
+    case tree if ctx.isBestEffort => 
+      pickleError()
   }
 
   def pickleMethodic(tag: Int, tpe: LambdaType, mods: FlagSet)(using Context): Unit = {
@@ -315,8 +327,13 @@ class TreePickler(pickler: TastyPickler) {
     pickled
   }
 
+  def pickleError(): Unit = {
+    writeByte(ERRORtype)
+  }
+
   def pickleTpt(tpt: Tree)(using Context): Unit =
-    pickleTree(tpt)
+    if assertForBestEffort(tpt.isType) then pickleTree(tpt)
+    else pickleError()
 
   def pickleTreeUnlessEmpty(tree: Tree)(using Context): Unit = {
     if (!tree.isEmpty) pickleTree(tree)
@@ -325,34 +342,37 @@ class TreePickler(pickler: TastyPickler) {
   def pickleDef(tag: Int, mdef: MemberDef, tpt: Tree, rhs: Tree = EmptyTree, pickleParams: => Unit = ())(using Context): Unit = {
     val sym = mdef.symbol
 
-    assert(symRefs(sym) == NoAddr, sym)
-    registerDef(sym)
-    writeByte(tag)
-    val addr = currentAddr
-    try
-      withLength {
-        pickleName(sym.name)
-        pickleParams
-        tpt match {
-          case _: Template | _: Hole => pickleTree(tpt)
-          case _ if tpt.isType => pickleTpt(tpt)
+    if assertForBestEffort(symRefs(sym) == NoAddr) then
+      assert(symRefs(sym) == NoAddr, sym)
+      registerDef(sym)
+      writeByte(tag)
+      val addr = currentAddr
+      try
+        withLength {
+          pickleName(sym.name)
+          pickleParams
+          tpt match {
+            case _: Template | _: Hole => pickleTree(tpt)
+            case _ if tpt.isType => pickleTpt(tpt)
+            case _ if ctx.isBestEffort => pickleError()
+          }
+          pickleTreeUnlessEmpty(rhs)
+          pickleModifiers(sym, mdef)
         }
-        pickleTreeUnlessEmpty(rhs)
-        pickleModifiers(sym, mdef)
-      }
-    catch
-      case ex: Throwable =>
-        if !ctx.settings.YnoDecodeStacktraces.value
-          && handleRecursive.underlyingStackOverflowOrNull(ex) != null then
-          throw StackSizeExceeded(mdef)
-        else
-          throw ex
-    if sym.is(Method) && sym.owner.isClass then
-      profile.recordMethodSize(sym, currentAddr.index - addr.index, mdef.span)
-    for docCtx <- ctx.docCtx do
-      val comment = docCtx.docstrings.lookup(sym)
-      if comment != null then
-        docStrings(mdef) = comment
+      catch
+        case ex: Throwable =>
+          if !ctx.settings.YnoDecodeStacktraces.value
+            && handleRecursive.underlyingStackOverflowOrNull(ex) != null then
+            throw StackSizeExceeded(mdef)
+          else
+            throw ex
+      if sym.is(Method) && sym.owner.isClass then
+        profile.recordMethodSize(sym, currentAddr.index - addr.index, mdef.span)
+      for docCtx <- ctx.docCtx do
+        val comment = docCtx.docstrings.lookup(sym)
+        if comment != null then
+          docStrings(mdef) = comment
+    else ()
   }
 
   def pickleParam(tree: Tree)(using Context): Unit = {
@@ -382,21 +402,26 @@ class TreePickler(pickler: TastyPickler) {
     else
       try tree match {
         case Ident(name) =>
-          tree.tpe match {
-            case tp: TermRef if name != nme.WILDCARD =>
-              // wildcards are pattern bound, need to be preserved as ids.
-              pickleType(tp)
-            case tp =>
-              writeByte(if (tree.isType) IDENTtpt else IDENT)
-              pickleName(name)
-              pickleType(tp)
-          }
+          if assertForBestEffort(tree.hasType) then
+            tree.tpe match {
+              case tp: TermRef if name != nme.WILDCARD =>
+                // wildcards are pattern bound, need to be preserved as ids.
+                pickleType(tp)
+              case tp =>
+                writeByte(if (tree.isType) IDENTtpt else IDENT)
+                pickleName(name)
+                pickleType(tp)
+            }
+          else pickleError()
         case This(qual) =>
           if (qual.isEmpty) pickleType(tree.tpe)
           else {
-            writeByte(QUALTHIS)
-            val ThisType(tref) = tree.tpe: @unchecked
-            pickleTree(qual.withType(tref))
+            tree.tpe match
+              case ThisType(tref) =>
+                writeByte(QUALTHIS)
+                pickleTree(qual.withType(tref))
+              case _: ErrorType if ctx.isBestEffort =>
+                pickleError()
           }
         case Select(qual, name) =>
           name match {
@@ -409,25 +434,27 @@ class TreePickler(pickler: TastyPickler) {
                 pickleType(tp)
               }
             case _ =>
-              val sig = tree.tpe.signature
-              var ename = tree.symbol.targetName
-              val selectFromQualifier =
-                name.isTypeName
-                || qual.isInstanceOf[Hole] // holes have no symbol
-                || sig == Signature.NotAMethod // no overload resolution necessary
-                || !tree.denot.symbol.exists // polymorphic function type
-                || tree.denot.asSingleDenotation.isRefinedMethod // refined methods have no defining class symbol
-              if selectFromQualifier then
-                writeByte(if name.isTypeName then SELECTtpt else SELECT)
-                pickleNameAndSig(name, sig, ename)
-                pickleTree(qual)
-              else // select from owner
-                writeByte(SELECTin)
-                withLength {
-                  pickleNameAndSig(name, tree.symbol.signature, ename)
+              if assertForBestEffort(tree.hasType) then
+                val sig = tree.tpe.signature
+                var ename = tree.symbol.targetName
+                val selectFromQualifier =
+                  name.isTypeName
+                  || qual.isInstanceOf[Hole] // holes have no symbol
+                  || sig == Signature.NotAMethod // no overload resolution necessary
+                  || !tree.denot.symbol.exists // polymorphic function type
+                  || tree.denot.asSingleDenotation.isRefinedMethod // refined methods have no defining class symbol
+                if selectFromQualifier then
+                  writeByte(if name.isTypeName then SELECTtpt else SELECT)
+                  pickleNameAndSig(name, sig, ename)
                   pickleTree(qual)
-                  pickleType(tree.symbol.owner.typeRef)
-                }
+                else // select from owner
+                  writeByte(SELECTin)
+                  withLength {
+                    pickleNameAndSig(name, tree.symbol.signature, ename)
+                    pickleTree(qual)
+                    pickleType(tree.symbol.owner.typeRef)
+                  }
+              else pickleError()
           }
         case Apply(fun, args) =>
           if (fun.symbol eq defn.throwMethod) {
@@ -455,12 +482,14 @@ class TreePickler(pickler: TastyPickler) {
             args.foreach(pickleTpt)
           }
         case Literal(const1) =>
-          pickleConstant {
-            tree.tpe match {
-              case ConstantType(const2) => const2
-              case _ => const1
+          if assertForBestEffort(tree.hasType) then
+            pickleConstant {
+              tree.tpe match {
+                case ConstantType(const2) => const2
+                case _ => const1
+              }
             }
-          }
+          else ()
         case Super(qual, mix) =>
           writeByte(SUPER)
           withLength {
@@ -588,23 +617,25 @@ class TreePickler(pickler: TastyPickler) {
           withLength {
             pickleParams(params)
             tree.parents.foreach(pickleTree)
-            val cinfo @ ClassInfo(_, _, _, _, selfInfo) = tree.symbol.owner.info: @unchecked
-            if (!tree.self.isEmpty) {
-              writeByte(SELFDEF)
-              pickleName(tree.self.name)
+            if (assertForBestEffort(tree.symbol.exists)) {
+              val cinfo @ ClassInfo(_, _, _, _, selfInfo) = tree.symbol.owner.info: @unchecked
+              if (!tree.self.isEmpty) {
+                writeByte(SELFDEF)
+                pickleName(tree.self.name)
 
-              if (!tree.self.tpt.isEmpty) pickleTree(tree.self.tpt)
-              else {
-                if (!tree.self.isEmpty) registerTreeAddr(tree.self)
-                pickleType {
-                  selfInfo match {
-                    case sym: Symbol => sym.info
-                    case tp: Type => tp
+                if (!tree.self.tpt.isEmpty) pickleTree(tree.self.tpt)
+                else {
+                  if (!tree.self.isEmpty) registerTreeAddr(tree.self)
+                  pickleType {
+                    selfInfo match {
+                      case sym: Symbol => sym.info
+                      case tp: Type => tp
+                    }
                   }
                 }
               }
-            }
-            pickleStats(tree.constr :: rest)
+              pickleStats(tree.constr :: rest)
+            } else pickleError()
           }
         case Import(expr, selectors) =>
           writeByte(IMPORT)
@@ -622,19 +653,22 @@ class TreePickler(pickler: TastyPickler) {
           writeByte(PACKAGE)
           withLength { pickleType(pid.tpe); pickleStats(stats) }
         case tree: TypeTree =>
-          pickleType(tree.tpe)
+          if assertForBestEffort(tree.hasType) then pickleType(tree.tpe)
+          else pickleError()
         case SingletonTypeTree(ref) =>
           writeByte(SINGLETONtpt)
           pickleTree(ref)
         case RefinedTypeTree(parent, refinements) =>
           if (refinements.isEmpty) pickleTree(parent)
           else {
-            val refineCls = refinements.head.symbol.owner.asClass
-            registerDef(refineCls)
-            pickledTypes(refineCls.typeRef) = currentAddr
-            writeByte(REFINEDtpt)
-            refinements.foreach(preRegister)
-            withLength { pickleTree(parent); refinements.foreach(pickleTree) }
+            if assertForBestEffort(refinements.head.symbol.exists) then
+              val refineCls = refinements.head.symbol.owner.asClass
+              registerDef(refineCls)
+              pickledTypes(refineCls.typeRef) = currentAddr
+              writeByte(REFINEDtpt)
+              refinements.foreach(preRegister)
+              withLength { pickleTree(parent); refinements.foreach(pickleTree) }
+            else pickleError()
           }
         case AppliedTypeTree(tycon, args) =>
           writeByte(APPLIEDtpt)
@@ -692,6 +726,8 @@ class TreePickler(pickler: TastyPickler) {
             pickleType(tree.tpe, richTypes = true)
             args.foreach(pickleTree)
           }
+        case other if ctx.isBestEffort =>
+          writeByte(ERRORtype)
       }
       catch {
         case ex: TypeError =>
@@ -794,6 +830,7 @@ class TreePickler(pickler: TastyPickler) {
       // a different toplevel class, it is impossible to pickle a reference to it.
       // Such annotations will be reconstituted when unpickling the child class.
       // See tests/pickling/i3149.scala
+    case _ if ctx.isBestEffort && !ann.symbol.denot.isError => true
     case _ =>
       ann.symbol == defn.BodyAnnot // inline bodies are reconstituted automatically when unpickling
   }

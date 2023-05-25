@@ -100,8 +100,8 @@ class Driver {
             None
           else file.extension match
             case "jar" => Some(file.path)
-            case "tasty" =>
-              TastyFileUtil.getClassPath(file) match
+            case "tasty" | "betasty" =>
+              TastyFileUtil.getClassPath(file, ctx.withBestEffortTasty) match
                 case Some(classpath) => Some(classpath)
                 case _ =>
                   report.error(em"Could not load classname from: ${file.path}")

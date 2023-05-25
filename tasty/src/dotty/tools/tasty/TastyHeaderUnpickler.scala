@@ -2,7 +2,7 @@ package dotty.tools.tasty
 
 import java.util.UUID
 
-import TastyFormat.{MajorVersion, MinorVersion, ExperimentalVersion, header}
+import TastyFormat.{MajorVersion, MinorVersion, ExperimentalVersion, header, bestEffortHeader}
 
 /**
  * The Tasty Header consists of four fields:
@@ -18,13 +18,16 @@ import TastyFormat.{MajorVersion, MinorVersion, ExperimentalVersion, header}
  *     is broken since the previous stable version.
  * - toolingVersion
  *   - arbitrary string representing the tooling that produced the TASTy
+ * - isBestEffort
+ *   - signifies if it is a best effort TASTy file, or a regular one
  */
 sealed abstract case class TastyHeader(
   uuid: UUID,
   majorVersion: Int,
   minorVersion: Int,
   experimentalVersion: Int,
-  toolingVersion: String
+  toolingVersion: String,
+  isBestEffort: Boolean
 )
 
 class TastyHeaderUnpickler(reader: TastyReader) {
@@ -34,14 +37,20 @@ class TastyHeaderUnpickler(reader: TastyReader) {
   def this(bytes: Array[Byte]) = this(new TastyReader(bytes))
 
   /** reads and verifies the TASTy version, extracting the UUID */
-  def readHeader(): UUID =
-    readFullHeader().uuid
+  def readHeader(withBestEffortTasty: Boolean = false): UUID =
+    readFullHeader(withBestEffortTasty).uuid
 
   /** reads and verifies the TASTy version, extracting the whole header */
-  def readFullHeader(): TastyHeader = {
+  def readFullHeader(withBestEffortTasty: Boolean = false): TastyHeader = {
 
-    for (i <- 0 until header.length)
-      check(readByte() == header(i), "not a TASTy file")
+    val isBestEffort = {
+      val readHeader = (for (i <- 0 until header.length) yield readByte()).toArray
+
+      if (readHeader.sameElements(header)) false
+      else if (!withBestEffortTasty) throw new UnpickleException("not a TASTy file")
+      else if (readHeader.sameElements(bestEffortHeader)) true
+      else throw new UnpickleException("not a TASTy or best effort TASTy file")
+    }
     val fileMajor = readNat()
     if (fileMajor <= 27) { // old behavior before `tasty-core` 3.0.0-M4
       val fileMinor = readNat()
@@ -80,7 +89,7 @@ class TastyHeaderUnpickler(reader: TastyReader) {
       })
 
       val uuid = new UUID(readUncompressedLong(), readUncompressedLong())
-      new TastyHeader(uuid, fileMajor, fileMinor, fileExperimental, toolingVersion) {}
+      new TastyHeader(uuid, fileMajor, fileMinor, fileExperimental, toolingVersion, isBestEffort) {}
     }
   }
 

@@ -16,6 +16,7 @@ import reporting.{ThrowingReporter, Profile, Message}
 import collection.mutable
 import util.concurrent.{Executor, Future}
 import compiletime.uninitialized
+import java.nio.file.Paths
 
 object Pickler {
   val name: String = "pickler"
@@ -77,6 +78,7 @@ class Pickler extends Phase {
 
   override def run(using Context): Unit = {
     val unit = ctx.compilationUnit
+    val isBestEffort = ctx.reporter.errorsReported || ctx.usesBestEffortTasty
     pickling.println(i"unpickling in run ${ctx.runId}")
 
     for
@@ -108,7 +110,7 @@ class Pickler extends Phase {
                 pickler, treePkl.buf.addrOfTree, treePkl.docString, tree,
                 scratch.commentBuffer)
 
-          val pickled = pickler.assembleParts()
+          val pickled = pickler.assembleParts(isBestEffort)
 
           def rawBytes = // not needed right now, but useful to print raw format.
             pickled.iterator.grouped(10).toList.zipWithIndex.map {
@@ -159,6 +161,9 @@ class Pickler extends Phase {
             .setReporter(new ThrowingReporter(ctx.reporter))
             .addMode(Mode.ReadPositions)
             .addMode(Mode.PrintShowExceptions))
+    if ctx.isBestEffort then
+      val dir = Paths.get(ctx.settings.YbestEffortDir.value)
+      BestEffortTastyWriter.write(dir.nn, units)
     result
   }
 

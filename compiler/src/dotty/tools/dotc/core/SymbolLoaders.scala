@@ -14,6 +14,7 @@ import Contexts._, Symbols._, Flags._, SymDenotations._, Types._, Scopes._, Name
 import NameOps._
 import StdNames._
 import classfile.ClassfileParser
+import classfile.BestEffortTastyParser
 import Decorators._
 
 import util.Stats
@@ -256,7 +257,8 @@ object SymbolLoaders {
       (idx + str.TOPLEVEL_SUFFIX.length + 1 != name.length || !name.endsWith(str.TOPLEVEL_SUFFIX))
     }
 
-    def maybeModuleClass(classRep: ClassRepresentation): Boolean = classRep.name.last == '$'
+    def maybeModuleClass(classRep: ClassRepresentation): Boolean = 
+      classRep.name.nonEmpty && classRep.name.last == '$'
 
     private def enterClasses(root: SymDenotation, packageName: String, flat: Boolean)(using Context) = {
       def isAbsent(classRep: ClassRepresentation) =
@@ -408,9 +410,14 @@ class ClassfileLoader(val classfile: AbstractFile) extends SymbolLoader {
 
   def load(root: SymDenotation)(using Context): Unit = {
     val (classRoot, moduleRoot) = rootDenots(root.asClass)
-    val classfileParser = new ClassfileParser(classfile, classRoot, moduleRoot)(ctx)
-    val result = classfileParser.run()
-    if (mayLoadTreesFromTasty)
+    val isBestEffortTasty = classfile.name.endsWith(".betasty")
+    val result =
+      if isBestEffortTasty then
+        new BestEffortTastyParser(classfile, classRoot, moduleRoot)(ctx).run()
+      else
+        new ClassfileParser(classfile, classRoot, moduleRoot)(ctx).run()
+
+    if (mayLoadTreesFromTasty || (isBestEffortTasty && ctx.withBestEffortTasty))
       result match {
         case Some(unpickler: tasty.DottyUnpickler) =>
           classRoot.classSymbol.rootTreeOrProvider = unpickler

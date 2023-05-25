@@ -277,6 +277,12 @@ object TastyFormat {
     */
   final val header: Array[Int] = Array(0x5C, 0xA1, 0xAB, 0x1F)
 
+  /** First four bytes of a best effort TASTy file, used instead of the regular header.
+   *  Signifies that the TASTy can only be consumed by the compiler in the best effort mode.
+   *  Other than that, versioning works as usual, disallowing Best Effort Tasty from older minor versions.
+   */
+  final var bestEffortHeader: Array[Int] = Array(0x5C, 0xA1, 0xAB, 0x20)
+
   /** Natural number. Each increment of the `MajorVersion` begins a
    *  new series of backward compatible TASTy versions.
    *
@@ -475,6 +481,9 @@ object TastyFormat {
   final val INVISIBLE = 44
   final val EMPTYCLAUSE = 45
   final val SPLITCLAUSE = 46
+
+  // Best Effort TASTy only
+  final val ERRORtype = 50
 
   // Cat. 2:    tag Nat
 
@@ -804,6 +813,7 @@ object TastyFormat {
     case PRIVATEqualified => "PRIVATEqualified"
     case PROTECTEDqualified => "PROTECTEDqualified"
     case HOLE => "HOLE"
+    case ERRORtype => "ERRORtype" // Best Effort TASTy only
   }
 
   /** @return If non-negative, the number of leading references (represented as nats) of a length/trees entry.

@@ -699,6 +699,7 @@ object Types {
      *  the type of the member as seen from given prefix `pre`.
      */
     final def findMember(name: Name, pre: Type, required: FlagSet = EmptyFlags, excluded: FlagSet = EmptyFlags)(using Context): Denotation = {
+      // println("findMember " + name + " " + pre + " " + required)
       @tailrec def go(tp: Type): Denotation = tp match {
         case tp: TermRef =>
           go (tp.underlying match {
@@ -3511,8 +3512,8 @@ object Types {
 
     def apply(tp1: Type, tp2: Type, soft: Boolean)(using Context): OrType = {
       def where = i"in union $tp1 | $tp2"
-      expectValueTypeOrWildcard(tp1, where)
-      expectValueTypeOrWildcard(tp2, where)
+      if (!ctx.usesBestEffortTasty) expectValueTypeOrWildcard(tp1, where)
+      if (!ctx.usesBestEffortTasty) expectValueTypeOrWildcard(tp2, where)
       assertUnerased()
       unique(new CachedOrType(tp1, tp2, soft))
     }

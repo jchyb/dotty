@@ -28,10 +28,11 @@ object TastyUnpickler {
 
 import TastyUnpickler._
 
-class TastyUnpickler(reader: TastyReader) {
+class TastyUnpickler(reader: TastyReader, withBestEffortTasty: Boolean = false) {
   import reader._
 
-  def this(bytes: Array[Byte]) = this(new TastyReader(bytes))
+  def this(bytes: Array[Byte]) = this(new TastyReader(bytes), false)
+  def this(bytes: Array[Byte], withBestEffortTasty: Boolean) = this(new TastyReader(bytes), withBestEffortTasty)
 
   private val sectionReader = new mutable.HashMap[String, TastyReader]
   val nameAtRef: NameTable = new NameTable
@@ -88,7 +89,9 @@ class TastyUnpickler(reader: TastyReader) {
     result
   }
 
-  new TastyHeaderUnpickler(reader).readHeader()
+  private val fullTastyHeader = new TastyHeaderUnpickler(reader).readFullHeader(withBestEffortTasty)
+  val tastyHeader = fullTastyHeader.uuid
+  val isBestEffortTasty = fullTastyHeader.isBestEffort
 
   locally {
     until(readEnd()) { nameAtRef.add(readNameContents()) }

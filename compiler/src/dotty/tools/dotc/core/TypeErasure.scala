@@ -709,12 +709,13 @@ class TypeErasure(sourceLanguage: SourceLanguage, semiEraseVCs: Boolean, isConst
   private def checkedSuperType(tp: TypeProxy)(using Context): Type =
     val tp1 = tp.translucentSuperType
     if !tp1.exists then
-      val msg = tp.typeConstructor match
-        case tycon: TypeRef =>
-          MissingType(tycon.prefix, tycon.name).toMessage.message
-        case _ =>
-          i"Cannot resolve reference to $tp"
-      throw FatalError(msg)
+        val msg = tp.typeConstructor match
+          case tycon: TypeRef =>
+            MissingType(tycon.prefix, tycon.name).toMessage.message
+          case _ =>
+            i"Cannot resolve reference to $tp"
+        if ctx.isBestEffort then report.error(msg)
+        else throw FatalError(msg)
     tp1
 
   /** Widen term ref, skipping any `()` parameter of an eventual getter. Used to erase a TermRef.

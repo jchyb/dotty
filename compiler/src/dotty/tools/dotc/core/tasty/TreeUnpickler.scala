@@ -51,11 +51,13 @@ import scala.annotation.internal.sharable
  *  @param reader              the reader from which to unpickle
  *  @param posUnpicklerOpt     the unpickler for positions, if it exists
  *  @param commentUnpicklerOpt the unpickler for comments, if it exists
+ *  @param isBestEffortTasty   decides whether to unpickle as a Best Effort TASTy 
  */
 class TreeUnpickler(reader: TastyReader,
                     nameAtRef: NameTable,
                     posUnpicklerOpt: Option[PositionUnpickler],
-                    commentUnpicklerOpt: Option[CommentUnpickler]) {
+                    commentUnpicklerOpt: Option[CommentUnpickler],
+                    isBestEffortTasty: Boolean = false) {
   import TreeUnpickler._
   import tpd._
 
@@ -462,7 +464,14 @@ class TreeUnpickler(reader: TastyReader,
           ConstantType(readConstant(tag))
       }
 
-      if (tag < firstLengthTreeTag) readSimpleType() else readLengthType()
+      def readSimpleTypeBestEffort(): Type = tag match {
+        case ERRORtype => new PreviousErrorType
+        case _ => readSimpleType()
+      }
+
+      if (tag < firstLengthTreeTag){
+        if (isBestEffortTasty) readSimpleTypeBestEffort() else readSimpleType()
+      } else readLengthType()
     }
 
     private def readSymNameRef()(using Context): Type = {
@@ -905,7 +914,9 @@ class TreeUnpickler(reader: TastyReader,
             def isCodefined = roots.contains(companion.denot) == seenRoots.contains(companion)
 
             if (companion.exists && isCodefined) sym.registerCompanion(companion)
-            TypeDef(readTemplate(using localCtx))
+            (readTemplate(using localCtx): @unchecked) match
+              case Some(template) => TypeDef(template)
+              case None if isBestEffortTasty => return EmptyTree
           }
           else {
             sym.info = TypeBounds.empty // needed to avoid cyclic references when unpickling rhs, see i3816.scala
@@ -913,6 +924,7 @@ class TreeUnpickler(reader: TastyReader,
             val rhs = readTpt()(using localCtx)
 
             sym.info = new NoCompleter:
+              override def complete(denot: SymDenotation)(using Context): Unit = if !isBestEffortTasty then unsupported("complete")
               override def completerTypeParams(sym: Symbol)(using Context) =
                 rhs.tpe.typeParams
 
@@ -988,16 +1000,25 @@ class TreeUnpickler(reader: TastyReader,
             case nu: New =>
               try nu.tpe
               finally goto(end)
+            case other if isBestEffortTasty =>
+              try other.tpe
+              finally goto(end)
         case SHAREDterm =>
           forkAt(readAddr()).readParentType()
+        case _ if isBestEffortTasty =>
+          val end = readEnd()
+          goto(end)
+          new PreviousErrorType()
 
     /** Read template parents
      *  @param  withArgs if false, only read enough of parent trees to determine their type
      *                   but skip constructor arguments. Return any trees that were partially
      *                   parsed in this way as InferredTypeTrees.
+     *  @param  end      specifies last address that can be read. Should be set for Best Effort
+     *                   TASTy compilation, otherwise should be None 
      */
-    def readParents(withArgs: Boolean)(using Context): List[Tree] =
-      collectWhile(nextByte != SELFDEF && nextByte != DEFDEF) {
+    def readParents(withArgs: Boolean, end: Option[Addr])(using Context): List[Tree] =
+      collectWhile(nextByte != SELFDEF && nextByte != DEFDEF && end.map(_ != currentAddr).getOrElse(true)) {
         nextUnsharedTag match
           case APPLY | TYPEAPPLY | BLOCK =>
             if withArgs then readTree()
@@ -1005,7 +1026,7 @@ class TreeUnpickler(reader: TastyReader,
           case _ => readTpt()
       }
 
-    private def readTemplate(using Context): Template = {
+    private def readTemplate(using Context): Option[Template] =
       val start = currentAddr
       assert(sourcePathAt(start).isEmpty)
       val cls = ctx.owner.asClass
@@ -1024,12 +1045,13 @@ class TreeUnpickler(reader: TastyReader,
       val bodyFlags = {
         val bodyIndexer = fork
         // The first DEFDEF corresponds to the primary constructor
-        while (bodyIndexer.reader.nextByte != DEFDEF) bodyIndexer.skipTree()
+        while (bodyIndexer.reader.nextByte != DEFDEF && (!isBestEffortTasty || bodyIndexer.reader.currentAddr != end)) bodyIndexer.skipTree()
         bodyIndexer.indexStats(end)
       }
       val parentReader = fork
-      val parents = readParents(withArgs = false)(using parentCtx)
+      val parents = readParents(withArgs = false, if (isBestEffortTasty) Some(end) else None)(using parentCtx)
       val parentTypes = parents.map(_.tpe.dealias)
+      if isBestEffortTasty && currentAddr == end then return None
       val self =
         if (nextByte == SELFDEF) {
           readByte()
@@ -1046,7 +1068,7 @@ class TreeUnpickler(reader: TastyReader,
         if parents.exists(_.isInstanceOf[InferredTypeTree]) then
           // parents were not read fully, will need to be read again later on demand
           new LazyReader(parentReader, localDummy, ctx.mode, ctx.source,
-            _.readParents(withArgs = true)
+            _.readParents(withArgs = true, if (isBestEffortTasty) Some(end) else None)
              .map(_.changeOwner(localDummy, constr.symbol)))
         else parents
 
@@ -1056,10 +1078,11 @@ class TreeUnpickler(reader: TastyReader,
       })
       defn.patchStdLibClass(cls)
       NamerOps.addConstructorProxies(cls)
-      setSpan(start,
-        untpd.Template(constr, mappedParents, self, lazyStats)
-          .withType(localDummy.termRef))
-    }
+      Some(
+        setSpan(start,
+          untpd.Template(constr, mappedParents, self, lazyStats)
+            .withType(localDummy.termRef))
+      )
 
     def skipToplevel()(using Context): Unit= {
       if (!isAtEnd && isTopLevel) {
@@ -1176,6 +1199,7 @@ class TreeUnpickler(reader: TastyReader,
           case path: TermRef => ref(path)
           case path: ThisType => untpd.This(untpd.EmptyTypeIdent).withType(path)
           case path: ConstantType => Literal(path.value)
+          case path: ErrorType if isBestEffortTasty => TypeTree(path)
         }
       }
 

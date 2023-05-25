@@ -134,6 +134,8 @@ object MegaPhase {
 
     override def run(using Context): Unit =
       singletonGroup.run
+
+    override def isRunnable(using Context): Boolean = super.isRunnable && !ctx.usesBestEffortTasty
   }
 }
 import MegaPhase._
@@ -155,6 +157,8 @@ class MegaPhase(val miniPhases: Array[MiniPhase]) extends Phase {
     }
     relaxedTypingCache
   }
+
+  override def isRunnable(using Context): Boolean = super.isRunnable && !ctx.usesBestEffortTasty
 
   private val cpy: TypedTreeCopier = cpyBetweenPhases
 

@@ -225,6 +225,13 @@ class Run(comp: Compiler, ictx: Context) extends ImplicitRunInfo with Constraint
       if (ctx.settings.YtestPickler.value) List("pickler")
       else ctx.settings.YstopAfter.value
 
+    var forceReachPhaseMaybe =
+      if (ctx.isBestEffort) Some("typer")
+      else None
+
+    var reachedSemanticDB = false
+    var reachedPickler = false
+
     val pluginPlan = ctx.base.addPluginPhases(ctx.base.phasePlan)
     val phases = ctx.base.fusePhases(pluginPlan,
       ctx.settings.Yskip.value, ctx.settings.YstopBefore.value, stopAfter, ctx.settings.Ycheck.value)
@@ -239,7 +246,7 @@ class Run(comp: Compiler, ictx: Context) extends ImplicitRunInfo with Constraint
       var phasesWereAdjusted = false
 
       for (phase <- ctx.base.allPhases)
-        if (phase.isRunnable)
+        if (phase.isRunnable || forceReachPhaseMaybe.nonEmpty)
           Stats.trackTime(s"$phase ms ") {
             val start = System.currentTimeMillis
             val profileBefore = profiler.beforePhase(phase)
@@ -249,6 +256,24 @@ class Run(comp: Compiler, ictx: Context) extends ImplicitRunInfo with Constraint
               for (unit <- units)
                 lastPrintedTree =
                   printTree(lastPrintedTree)(using ctx.fresh.setPhase(phase.next).setCompilationUnit(unit))
+            
+            forceReachPhaseMaybe match {
+              case Some(forceReachPhase) if phase.phaseName == forceReachPhase =>
+                forceReachPhaseMaybe = None
+              case _ =>
+            }
+
+            if phase.phaseName == "extractSemanticDB" then reachedSemanticDB = true
+            if phase.phaseName == "pickler" then reachedPickler = true
+
+            if !reachedSemanticDB && forceReachPhaseMaybe.isEmpty && ctx.reporter.hasErrors && ctx.isBestEffort then
+              ctx.base.allPhases.find(_.phaseName == "extractSemanticDB").foreach(_.runOn(units))
+              reachedSemanticDB = true
+
+            if !reachedPickler && forceReachPhaseMaybe.isEmpty && ctx.reporter.hasErrors && ctx.isBestEffort then
+              ctx.base.allPhases.find(_.phaseName == "pickler").foreach(_.runOn(units))
+              reachedPickler = true
+
             report.informTime(s"$phase ", start)
             Stats.record(s"total trees at end of $phase", ast.Trees.ntrees)
             for (unit <- units)

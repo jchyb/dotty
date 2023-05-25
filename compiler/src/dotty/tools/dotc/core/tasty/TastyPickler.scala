@@ -31,7 +31,7 @@ class TastyPickler(val rootCls: ClassSymbol) {
   def newSection(name: String, buf: TastyBuffer): Unit =
     sections += ((nameBuffer.nameIndex(name.toTermName), buf))
 
-  def assembleParts(): Array[Byte] = {
+  def assembleParts(isBestEffortTasty: Boolean = false): Array[Byte] = {
     def lengthWithLength(buf: TastyBuffer) =
       buf.length + natSize(buf.length)
 
@@ -48,8 +48,9 @@ class TastyPickler(val rootCls: ClassSymbol) {
     val uuidHi: Long = otherSectionHashes.fold(0L)(_ ^ _)
 
     val headerBuffer = {
-      val buf = new TastyBuffer(header.length + TastyPickler.versionStringBytes.length + 32)
-      for (ch <- header) buf.writeByte(ch.toByte)
+      val fileHeader = if isBestEffortTasty then bestEffortHeader else header
+      val buf = new TastyBuffer(fileHeader.length + TastyPickler.versionStringBytes.length + 32)
+      for (ch <- fileHeader) buf.writeByte(ch.toByte)
       buf.writeNat(MajorVersion)
       buf.writeNat(MinorVersion)
       buf.writeNat(ExperimentalVersion)

@@ -37,6 +37,10 @@ object FileUtils {
 
     def isClass: Boolean = file.isFile && file.getName.endsWith(".class") && !file.getName.endsWith("$class.class")
       // FIXME: drop last condition when we stop being compatible with Scala 2.11
+
+    def isTasty: Boolean = file.isFile && file.getName.endsWith(".tasty")
+
+    def isBestEffortTasty: Boolean = file.isFile && file.getName.endsWith(".betasty")
   }
 
   private val SUFFIX_CLASS = ".class"
