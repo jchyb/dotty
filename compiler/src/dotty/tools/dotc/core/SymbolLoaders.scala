@@ -426,19 +426,19 @@ class TastyLoader(val tastyFile: AbstractFile) extends SymbolLoader {
     else "TASTy file " + tastyFile.toString
 
   override def doComplete(root: SymDenotation)(using Context): Unit =
-    val isBestEffortTasty = tastyFile.name.endsWith(".betasty")
+    val isBestEffortTasty = tastyFile.extension == "betasty"
     try
       val (classRoot, moduleRoot) = rootDenots(root.asClass)
       if (!isBestEffortTasty || ctx.withBestEffortTasty) then
         val tastyBytes = tastyFile.toByteArray
         val unpickler = new tasty.DottyUnpickler(tastyBytes, isBestEffortTasty = isBestEffortTasty)
         unpickler.enter(roots = Set(classRoot, moduleRoot, moduleRoot.sourceModule))(using ctx.withSource(util.NoSource))
-        if mayLoadTreesFromTasty || (isBestEffortTasty && ctx.withBestEffortTasty) then
+        if mayLoadTreesFromTasty || isBestEffortTasty then
           classRoot.classSymbol.rootTreeOrProvider = unpickler
           moduleRoot.classSymbol.rootTreeOrProvider = unpickler
         if isBestEffortTasty then
           checkBeTastyUUID(tastyFile, tastyBytes)
-          ctx.setUsesBestEffortTasty()
+          ctx.setUsedBestEffortTasty()
         else
           checkTastyUUID(tastyFile, tastyBytes)
       else

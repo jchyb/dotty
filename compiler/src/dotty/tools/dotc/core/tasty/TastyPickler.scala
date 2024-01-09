@@ -23,7 +23,7 @@ object TastyPickler {
 
 }
 
-class TastyPickler(val rootCls: ClassSymbol) {
+class TastyPickler(val rootCls: ClassSymbol, isBestEffortTasty: Boolean) {
 
   private val sections = new mutable.ArrayBuffer[(NameRef, TastyBuffer)]
 
@@ -32,7 +32,7 @@ class TastyPickler(val rootCls: ClassSymbol) {
   def newSection(name: String, buf: TastyBuffer): Unit =
     sections += ((nameBuffer.nameIndex(name.toTermName), buf))
 
-  def assembleParts(isBestEffortTasty: Boolean = false): Array[Byte] = {
+  def assembleParts(): Array[Byte] = {
     def lengthWithLength(buf: TastyBuffer) =
       buf.length + natSize(buf.length)
 

@@ -15,7 +15,7 @@ import dotty.tools.io.{JarArchive, Path}
 
 object TastyPrinter:
 
-  def showContents(bytes: Array[Byte], noColor: Boolean, isBestEffortTasty: Boolean = false): String =
+  def showContents(bytes: Array[Byte], noColor: Boolean, isBestEffortTasty: Boolean): String =
     val printer =
       if noColor then new TastyPrinter(bytes, isBestEffortTasty)
       else new TastyAnsiiPrinter(bytes, isBestEffortTasty)
@@ -29,7 +29,7 @@ object TastyPrinter:
     val noColor = args.contains("-color:never")
     val allowBetasty = args.contains(betastyOpt)
     var printLastLine = false
-    def printTasty(fileName: String, bytes: Array[Byte], isBestEffortTasty: Boolean = false): Unit =
+    def printTasty(fileName: String, bytes: Array[Byte], isBestEffortTasty: Boolean): Unit =
       println(line)
       println(fileName)
       println(line)
@@ -51,7 +51,7 @@ object TastyPrinter:
         val jar = JarArchive.open(Path(arg), create = false)
         try
           for file <- jar.iterator() if file.name.endsWith(".tasty") do
-            printTasty(s"$arg ${file.path}", file.toByteArray)
+            printTasty(s"$arg ${file.path}", file.toByteArray, false)
         finally jar.close()
       else
         println(s"Not a '.tasty' or '.jar' file: $arg")
@@ -61,7 +61,7 @@ object TastyPrinter:
       println(line)
   }
 
-class TastyPrinter(bytes: Array[Byte], isBestEffortTasty: Boolean = false) {
+class TastyPrinter(bytes: Array[Byte], isBestEffortTasty: Boolean) {
 
   private val sb: StringBuilder = new StringBuilder
 

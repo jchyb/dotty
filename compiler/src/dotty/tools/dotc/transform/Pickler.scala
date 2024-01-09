@@ -43,7 +43,7 @@ class Pickler extends Phase {
   override def isRunnable(using Context): Boolean =
     (super.isRunnable || ctx.isBestEffort)
     && !ctx.settings.fromTasty.value
-    && (!ctx.usesBestEffortTasty || ctx.isBestEffort)
+    && (!ctx.usedBestEffortTasty || ctx.isBestEffort)
     // we do not want to pickle `.betasty` if will not create the file either way
 
   private def output(name: String, msg: String) = {
@@ -83,7 +83,7 @@ class Pickler extends Phase {
 
   override def run(using Context): Unit = {
     val unit = ctx.compilationUnit
-    val isBestEffort = ctx.reporter.errorsReported || ctx.usesBestEffortTasty
+    val isBestEffort = ctx.reporter.errorsReported || ctx.usedBestEffortTasty
     pickling.println(i"unpickling in run ${ctx.runId}")
 
     for
@@ -92,7 +92,7 @@ class Pickler extends Phase {
     do
       if ctx.settings.YtestPickler.value then beforePickling(cls) = tree.show
 
-      val pickler = new TastyPickler(cls)
+      val pickler = new TastyPickler(cls, isBestEffortTasty = isBestEffort)
       val treePkl = new TreePickler(pickler)
       val successful =
         try
@@ -128,7 +128,7 @@ class Pickler extends Phase {
           )
           AttributePickler.pickleAttributes(attributes, pickler, scratch.attributeBuffer)
 
-          val pickled = pickler.assembleParts(isBestEffort)
+          val pickled = pickler.assembleParts()
 
           def rawBytes = // not needed right now, but useful to print raw format.
             pickled.iterator.grouped(10).toList.zipWithIndex.map {
@@ -138,7 +138,7 @@ class Pickler extends Phase {
           // println(i"rawBytes = \n$rawBytes%\n%") // DEBUG
           if ctx.settings.YprintTasty.value || pickling != noPrinter then
             println(i"**** pickled info of $cls")
-            println(TastyPrinter.showContents(pickled, ctx.settings.color.value == "never"))
+            println(TastyPrinter.showContents(pickled, ctx.settings.color.value == "never", isBestEffortTasty = false))
             println(i"**** end of pickled info of $cls")
           pickled
         }
@@ -197,7 +197,7 @@ class Pickler extends Phase {
     ctx.initialize()
     val unpicklers =
       for ((cls, (unit, bytes)) <- pickledBytes) yield {
-        val unpickler = new DottyUnpickler(bytes)
+        val unpickler = new DottyUnpickler(bytes, isBestEffortTasty = false)
         unpickler.enter(roots = Set.empty)
         cls -> (unit, unpickler)
       }

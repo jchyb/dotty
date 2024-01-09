@@ -275,6 +275,7 @@ Standard Section: "Attributes" Attribute*
 ```
 
 **************************************************************************************/
+
 object TastyFormat {
 
   /** The first four bytes of a TASTy file, followed by four values:
@@ -484,9 +485,6 @@ object TastyFormat {
   final val INVISIBLE = 44
   final val EMPTYCLAUSE = 45
   final val SPLITCLAUSE = 46
-
-  // Best Effort TASTy only
-  final val ERRORtype = 50
 
   // Cat. 2:    tag Nat
 
@@ -826,7 +824,6 @@ object TastyFormat {
     case PROTECTEDqualified => "PROTECTEDqualified"
     case EXPLICITtpt => "EXPLICITtpt"
     case HOLE => "HOLE"
-    case ERRORtype => "ERRORtype" // Best Effort TASTy only
   }
 
   def attributeTagToString(tag: Int): String = tag match {
