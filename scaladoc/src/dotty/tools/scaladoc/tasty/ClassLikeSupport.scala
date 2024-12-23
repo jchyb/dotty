@@ -374,6 +374,7 @@ trait ClassLikeSupport:
       paramPrefix: Symbol => String = _ => "",
       specificKind: (Kind.Def => Kind) = identity
     ): Member =
+    println(s"parseMethod ${c.symbol.name} -> ${methodSymbol.name}")
     val method = methodSymbol.tree.asInstanceOf[DefDef]
     val paramLists = methodSymbol.nonExtensionParamLists.filter:
       case TypeParamClause(_) => true

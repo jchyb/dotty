@@ -20,12 +20,21 @@ trait TypesSupport:
         import reflect._
         tpeTree match
           case TypeBoundsTree(low, high) => typeBoundsTreeOfHigherKindedType(low.tpe, high.tpe)(using elideThis)
-          case tpeTree: TypeTree => topLevelProcess(tpeTree.tpe)(using elideThis)
+          case tpeTree: TypeTree =>
+            // val ts = tpeTree.tpe.typeSymbol
+            // if ts.isNoSymbol then
+            //   println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            //   println(tpeTree.show(using Printer.TreeStructure))
+            topLevelProcess(tpeTree.tpe)(using elideThis)
           case term: Term => topLevelProcess(term.tpe)(using elideThis)
 
   given TypeSyntax: AnyRef with
     extension (using Quotes)(tpe: reflect.TypeRepr)
       def asSignature(elideThis: reflect.ClassDef): SSignature =
+        // val ts = tpe.typeSymbol
+        // if ts.isNoSymbol then
+        //   println("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB")
+        //   println(tpe.show(using reflect.Printer.TypeReprStructure))
         topLevelProcess(tpe)(using elideThis)
 
 
@@ -69,12 +78,29 @@ trait TypesSupport:
 
   private def topLevelProcess(using Quotes)(tp: reflect.TypeRepr)(using elideThis: reflect.ClassDef): SSignature =
     import reflect._
-    tp match
+    val res = tp match
       case ThisType(tpe) =>
         val suffix = List(keyword("this"), plain("."), keyword("type"))
         if skipPrefix(tp, elideThis) then suffix
         else inner(tpe) ++ plain(".").l ++ suffix
       case tpe => inner(tpe)
+    tp match
+      case ThisType(tpe) =>
+        println(s"AAAAAAAAAAAAAAAA topLevelProcess ${elideThis.symbol}")
+        println(tp.show(using Printer.TypeReprStructure))
+        // val elideThisTpe = This(elideThis.symbol).tpe
+        // println(elideThisTpe.show(using Printer.TypeReprStructure))
+        // println(tp.typeSymbol)
+        // val memberType = elideThisTpe.memberType(tp.typeSymbol)
+        // println(memberType.simplified.show(using Printer.TypeReprStructure))
+        // memberType.asType match
+        //   case '[t] => println(Type.show[t])
+
+        println(res)
+      case _ =>
+    res
+
+
 
   // TODO #23 add support for all types signatures that makes sense
   private def inner(
@@ -107,7 +133,11 @@ trait TypesSupport:
           case Some(_) => Nil
           case None    => inner(tpe) ++ plain(".").l
         val suffix = if skipTypeSuffix then Nil else List(plain("."), keyword("type"))
-        prefix ++ keyword("this").l ++ suffix
+        val res = prefix ++ keyword("this").l ++ suffix
+        println(s"BBBBBBBBBBBBBBBB inner ${elideThis.symbol}")
+        println(tp.show(using Printer.TypeReprStructure))
+        println(res)
+        res
       case AnnotatedType(AppliedType(_, Seq(tpe)), annotation) if isRepeatedAnnotation(annotation) =>
         inner(tpe) :+ plain("*")
       case AppliedType(repeatedClass, Seq(tpe)) if isRepeated(repeatedClass) =>

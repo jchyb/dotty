@@ -500,7 +500,7 @@ object Build {
   // Settings used when compiling dotty with a non-bootstrapped dotty
   lazy val commonBootstrappedSettings = commonDottySettings ++ Seq(
     // To enable support of scaladoc and language-server projects you need to change this to true
-    bspEnabled := { if(fullyDisabledProjects(name.value)) false else enableBspAllProjects },
+    bspEnabled := true, //{ if(fullyDisabledProjects(name.value)) false else enableBspAllProjects },
     (Compile / unmanagedSourceDirectories) += baseDirectory.value / "src-bootstrapped",
 
     version := dottyVersion,
@@ -1878,6 +1878,7 @@ object Build {
   lazy val scaladoc = project.in(file("scaladoc")).
     configs(SourceLinksIntegrationTest).
     settings(commonBootstrappedSettings).
+    settings(scalaVersion := dottyVersion).
     dependsOn(`scala3-compiler-bootstrapped`).
     dependsOn(`scala3-tasty-inspector`).
     settings(inConfig(SourceLinksIntegrationTest)(Defaults.testSettings)).
