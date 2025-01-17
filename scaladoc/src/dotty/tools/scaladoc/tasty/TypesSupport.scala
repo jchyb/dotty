@@ -389,7 +389,7 @@ trait TypesSupport:
 
     tr match
       case NoPrefix() => true
-      case ThisType(tp) if owners(tp.typeSymbol) => true
+      case ThisType(tp) if owners.head != tp.typeSymbol => false
       case tp if owners(tp.typeSymbol) => true
       case _ =>
         val flags = tr.typeSymbol.flags
